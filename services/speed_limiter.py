@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import logging
 import subprocess
 
@@ -50,9 +51,14 @@ def _ip_to_class_id(ip: str) -> int:
     return hash(ip) % 9998 + 2
 
 
-def _run(cmd: str) -> bool:
+def _validate_ip(ip: str) -> str:
+    """Validate and return normalized IP address."""
+    return str(ipaddress.ip_address(ip))
+
+
+def _run(cmd: list[str]) -> bool:
     try:
-        subprocess.run(cmd, shell=True, capture_output=True, timeout=10, check=True)
+        subprocess.run(cmd, capture_output=True, timeout=10, check=True)
         return True
     except subprocess.CalledProcessError:
         return False
@@ -66,13 +72,13 @@ async def init_tc():
     iface = _get_interface()
 
     # Remove existing qdisc (ignore errors)
-    _run(f"tc qdisc del dev {iface} root 2>/dev/null")
+    _run(["tc", "qdisc", "del", "dev", iface, "root"])
 
     # Create root HTB qdisc
-    _run(f"tc qdisc add dev {iface} root handle 1: htb default 9999")
+    _run(["tc", "qdisc", "add", "dev", iface, "root", "handle", "1:", "htb", "default", "9999"])
 
     # Default class (unlimited)
-    _run(f"tc class add dev {iface} parent 1: classid 1:9999 htb rate 1000mbit")
+    _run(["tc", "class", "add", "dev", iface, "parent", "1:", "classid", "1:9999", "htb", "rate", "1000mbit"])
 
     logger.info("TC initialized")
 
@@ -83,31 +89,33 @@ async def set_speed_limit(ip: str, speed_mbps: float):
         await remove_speed_limit(ip)
         return
 
+    ip = _validate_ip(ip)
     iface = _get_interface()
     class_id = _ip_to_class_id(ip)
     rate = f"{speed_mbps}mbit"
     burst = f"{max(int(speed_mbps * 1.5), 15)}k"
 
     # Remove existing class and filter for this IP (ignore errors)
-    _run(f"tc filter del dev {iface} parent 1: protocol ip prio 1 u32 match ip dst {ip}/32 2>/dev/null")
-    _run(f"tc class del dev {iface} parent 1: classid 1:{class_id} 2>/dev/null")
+    _run(["tc", "filter", "del", "dev", iface, "parent", "1:", "protocol", "ip", "prio", "1", "u32", "match", "ip", "dst", f"{ip}/32"])
+    _run(["tc", "class", "del", "dev", iface, "parent", "1:", "classid", f"1:{class_id}"])
 
     # Add class with speed limit
-    _run(f"tc class add dev {iface} parent 1:1 classid 1:{class_id} htb rate {rate} burst {burst}")
+    _run(["tc", "class", "add", "dev", iface, "parent", "1:1", "classid", f"1:{class_id}", "htb", "rate", rate, "burst", burst])
 
     # Add filter to match destination IP
-    _run(f"tc filter add dev {iface} parent 1: protocol ip prio 1 u32 match ip dst {ip}/32 flowid 1:{class_id}")
+    _run(["tc", "filter", "add", "dev", iface, "parent", "1:", "protocol", "ip", "prio", "1", "u32", "match", "ip", "dst", f"{ip}/32", "flowid", f"1:{class_id}"])
 
     logger.debug(f"Speed limit set: {ip} -> {speed_mbps} Mbps (class 1:{class_id})")
 
 
 async def remove_speed_limit(ip: str):
     """Remove speed limit for a specific IP address."""
+    ip = _validate_ip(ip)
     iface = _get_interface()
     class_id = _ip_to_class_id(ip)
 
-    _run(f"tc filter del dev {iface} parent 1: protocol ip prio 1 u32 match ip dst {ip}/32 2>/dev/null")
-    _run(f"tc class del dev {iface} parent 1: classid 1:{class_id} 2>/dev/null")
+    _run(["tc", "filter", "del", "dev", iface, "parent", "1:", "protocol", "ip", "prio", "1", "u32", "match", "ip", "dst", f"{ip}/32"])
+    _run(["tc", "class", "del", "dev", iface, "parent", "1:", "classid", f"1:{class_id}"])
 
     logger.debug(f"Speed limit removed: {ip}")
 
@@ -126,5 +134,5 @@ async def apply_speed_limit_for_client(api, email: str, speed_mbps: float):
 async def clear_all_limits():
     """Remove all tc rules."""
     iface = _get_interface()
-    _run(f"tc qdisc del dev {iface} root 2>/dev/null")
+    _run(["tc", "qdisc", "del", "dev", iface, "root"])
     logger.debug("All TC rules cleared")
