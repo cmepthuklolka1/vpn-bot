@@ -3,8 +3,10 @@ from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler
 from database import db
 from services.key_generator import generate_qr
 from utils.formatting import format_client_info
-from handlers.menu import back_button, main_menu_keyboard
+from handlers.menu import back_button, main_menu_keyboard, require_auth
+from html import escape
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,7 @@ EDIT_VALUE = 3
 
 # --- Create Client ---
 
+@require_auth
 async def create_client_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -26,10 +29,15 @@ async def create_client_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ENTER_NAME
 
 
+@require_auth
 async def create_client_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = context.bot_data["config"]
     api = context.bot_data["api"]
     name = update.message.text.strip()
+
+    if not re.match(r'^[a-zA-Z0-9_\-\.]+$', name):
+        await update.message.reply_text("❌ Имя может содержать только латиницу, цифры, _, -, точку. Попробуйте снова:")
+        return ENTER_NAME
 
     if not name or len(name) > 50:
         await update.message.reply_text("❌ Имя должно быть от 1 до 50 символов. Попробуйте снова:")
@@ -39,7 +47,7 @@ async def create_client_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
     existing = await api.get_clients()
     for c in existing:
         if c["email"].lower() == name.lower():
-            await update.message.reply_text(f"❌ Клиент <code>{name}</code> уже существует. Введите другое имя:", parse_mode="HTML")
+            await update.message.reply_text(f"❌ Клиент <code>{escape(name)}</code> уже существует. Введите другое имя:", parse_mode="HTML")
             return ENTER_NAME
 
     defaults = config["defaults"]
@@ -71,7 +79,7 @@ async def create_client_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if not key:
         await status_msg.edit_text(
-            f"✅ Клиент <b>{name}</b> создан, но не удалось сгенерировать ключ.\n"
+            f"✅ Клиент <b>{escape(name)}</b> создан, но не удалось сгенерировать ключ.\n"
             f"UUID: <code>{client['id']}</code>",
             parse_mode="HTML"
         )
@@ -79,7 +87,7 @@ async def create_client_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # Send key as monospace (copyable with one tap)
     await status_msg.edit_text(
-        f"✅ <b>Клиент создан: {name}</b>\n\n"
+        f"✅ <b>Клиент создан: {escape(name)}</b>\n\n"
         f"📋 Ключ подключения (нажмите чтобы скопировать):\n\n"
         f"<code>{key}</code>\n\n"
         f"📱 Устройств: {defaults['device_limit']}\n"
@@ -92,7 +100,7 @@ async def create_client_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
         qr_buf = generate_qr(key)
         await update.message.reply_photo(
             photo=InputFile(qr_buf, filename="qr.png"),
-            caption=f"QR-код для <b>{name}</b>",
+            caption=f"QR-код для <b>{escape(name)}</b>",
             parse_mode="HTML"
         )
     except Exception as e:
@@ -114,6 +122,7 @@ async def create_client_cancel(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # --- Manage Client (list and select) ---
 
+@require_auth
 async def manage_client_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -140,6 +149,7 @@ async def manage_client_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+@require_auth
 async def client_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -158,7 +168,7 @@ async def client_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
             break
 
     if not client:
-        await query.edit_message_text(f"❌ Клиент {email} не найден.", reply_markup=back_button())
+        await query.edit_message_text(f"❌ Клиент {escape(email)} не найден.", reply_markup=back_button())
         return
 
     traffic = await api.get_client_traffic(email)
@@ -206,6 +216,7 @@ async def client_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="HTML")
 
 
+@require_auth
 async def client_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data.split(":")
@@ -229,7 +240,7 @@ async def client_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
             from services.speed_limiter import apply_speed_limit_for_client
             await apply_speed_limit_for_client(api, email, 0)
         await query.edit_message_text(
-            f"{'🔓 Ограничение скорости снято вручную' if new_val else '🔒 Авто-управление скоростью включено'} для <b>{email}</b>",
+            f"{'🔓 Ограничение скорости снято вручную' if new_val else '🔒 Авто-управление скоростью включено'} для <b>{escape(email)}</b>",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("◀️ Назад к клиенту", callback_data=f"client_detail:{email}")
             ]]),
@@ -245,7 +256,7 @@ async def client_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
             new_state = not client.get("enable", True)
             await api.update_client(client["id"], {"enable": new_state})
             await query.edit_message_text(
-                f"{'✅ Клиент включён' if new_state else '❌ Клиент отключён'}: <b>{email}</b>",
+                f"{'✅ Клиент включён' if new_state else '❌ Клиент отключён'}: <b>{escape(email)}</b>",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("◀️ Назад к клиенту", callback_data=f"client_detail:{email}")
                 ]]),
@@ -258,7 +269,7 @@ async def client_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await api.reset_client_traffic(email)
         db.clear_notifications(f"client:{email}:")
         await query.edit_message_text(
-            f"🔄 Трафик сброшен для <b>{email}</b>",
+            f"🔄 Трафик сброшен для <b>{escape(email)}</b>",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("◀️ Назад к клиенту", callback_data=f"client_detail:{email}")
             ]]),
@@ -275,7 +286,7 @@ async def client_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
             ]
         ]
         await query.edit_message_text(
-            f"🗑 Удалить клиента <b>{email}</b>?\n\n⚠️ Это действие необратимо!",
+            f"🗑 Удалить клиента <b>{escape(email)}</b>?\n\n⚠️ Это действие необратимо!",
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode="HTML"
         )
@@ -290,7 +301,7 @@ async def client_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
             db.delete_client_config(email)
             is_admin = db.is_admin(query.from_user.id, config)
             await query.edit_message_text(
-                f"🗑 Клиент <b>{email}</b> удалён.",
+                f"🗑 Клиент <b>{escape(email)}</b> удалён.",
                 reply_markup=main_menu_keyboard(is_admin),
                 parse_mode="HTML"
             )
@@ -304,7 +315,7 @@ async def client_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
             key = await api.generate_vless_key(client["id"], email)
             if key:
                 await query.edit_message_text(
-                    f"🔑 <b>Ключ для {email}</b>\n\n<code>{key}</code>",
+                    f"🔑 <b>Ключ для {escape(email)}</b>\n\n<code>{key}</code>",
                     reply_markup=InlineKeyboardMarkup([[
                         InlineKeyboardButton("◀️ Назад к клиенту", callback_data=f"client_detail:{email}")
                     ]]),
@@ -315,7 +326,7 @@ async def client_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     qr_buf = generate_qr(key)
                     await query.message.reply_photo(
                         photo=InputFile(qr_buf, filename="qr.png"),
-                        caption=f"QR для <b>{email}</b>",
+                        caption=f"QR для <b>{escape(email)}</b>",
                         parse_mode="HTML"
                     )
                 except Exception as e:
@@ -335,6 +346,7 @@ async def client_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return EDIT_VALUE
 
 
+@require_auth
 async def client_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     api = context.bot_data["api"]
     config = context.bot_data["config"]
@@ -348,6 +360,10 @@ async def client_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         if action == "email":
+            # Validate new name
+            if not re.match(r'^[a-zA-Z0-9_\-\.]+$', value):
+                await update.message.reply_text("❌ Имя может содержать только латиницу, цифры, _, -, точку:")
+                return EDIT_VALUE
             # Rename client
             clients = await api.get_clients()
             client = next((c for c in clients if c["email"] == email), None)
@@ -383,7 +399,7 @@ async def client_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.upsert_client_config(email, speed_base_mbps=base, speed_80pct_mbps=s80, speed_95pct_mbps=s95)
 
         await update.message.reply_text(
-            f"✅ Изменения сохранены для <b>{email}</b>",
+            f"✅ Изменения сохранены для <b>{escape(email)}</b>",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("◀️ К клиенту", callback_data=f"client_detail:{email}"),
                 InlineKeyboardButton("🏠 Меню", callback_data="main_menu"),

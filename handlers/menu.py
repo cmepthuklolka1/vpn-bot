@@ -1,6 +1,41 @@
+from functools import wraps
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, ConversationHandler
 from database import db
+
+
+def require_auth(func):
+    """Decorator: reject unauthorized users."""
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        query = update.callback_query
+        user_id = query.from_user.id if query else update.effective_user.id
+        config = context.bot_data["config"]
+        if not db.is_authorized(user_id, config):
+            if query:
+                await query.answer("⛔ Доступ запрещён", show_alert=True)
+            else:
+                await update.message.reply_text("⛔ Доступ запрещён.")
+            return ConversationHandler.END
+        return await func(update, context, *args, **kwargs)
+    return wrapper
+
+
+def require_admin(func):
+    """Decorator: reject non-admin users."""
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        query = update.callback_query
+        user_id = query.from_user.id if query else update.effective_user.id
+        config = context.bot_data["config"]
+        if not db.is_admin(user_id, config):
+            if query:
+                await query.answer("⛔ Только для администратора", show_alert=True)
+            else:
+                await update.message.reply_text("⛔ Только для администратора.")
+            return ConversationHandler.END
+        return await func(update, context, *args, **kwargs)
+    return wrapper
 
 
 def main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:

@@ -4,10 +4,12 @@ from telegram.ext import ContextTypes
 from database import db
 from services.traffic_monitor import get_status_data
 from utils.formatting import format_status
+from handlers.menu import require_auth
 
 logger = logging.getLogger(__name__)
 
 
+@require_auth
 async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show current status (manual trigger via menu)."""
     query = update.callback_query
@@ -30,6 +32,7 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=buttons, parse_mode="HTML")
 
 
+@require_auth
 async def refresh_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Refresh status data."""
     query = update.callback_query
@@ -54,6 +57,7 @@ async def refresh_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
+@require_auth
 async def pin_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send and pin a status message that will be auto-updated."""
     query = update.callback_query
@@ -91,6 +95,7 @@ async def pin_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+@require_auth
 async def refresh_pinned(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Refresh pinned status message."""
     query = update.callback_query

@@ -147,6 +147,23 @@ async def post_shutdown(application: Application):
     logger.info("Bot shut down")
 
 
+async def error_handler(update: object, context) -> None:
+    """Global error handler — logs exceptions and notifies user."""
+    logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
+    if update and hasattr(update, "effective_user"):
+        try:
+            if hasattr(update, "callback_query") and update.callback_query:
+                await update.callback_query.answer(
+                    "❌ Произошла ошибка. Попробуйте снова.", show_alert=True
+                )
+            elif hasattr(update, "message") and update.message:
+                await update.message.reply_text(
+                    "❌ Произошла ошибка. Попробуйте /start для возврата в меню."
+                )
+        except Exception:
+            pass
+
+
 def main():
     config = load_config()
 
@@ -181,6 +198,7 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", clients.create_client_cancel)],
         per_message=False,
+        conversation_timeout=300,
     )
 
     # --- Conversation: Edit Client Field ---
@@ -195,6 +213,7 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", clients.create_client_cancel)],
         per_message=False,
+        conversation_timeout=300,
     )
 
     # --- Conversation: Edit Defaults ---
@@ -207,6 +226,7 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", clients.create_client_cancel)],
         per_message=False,
+        conversation_timeout=300,
     )
 
     # --- Conversation: Add Operator ---
@@ -222,6 +242,7 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", users.add_operator_cancel)],
         per_message=False,
+        conversation_timeout=300,
     )
 
     # Register handlers (order matters!)
@@ -254,6 +275,9 @@ def main():
     app.add_handler(CallbackQueryHandler(bans.unban_action, pattern=r"^unban"))
     app.add_handler(CallbackQueryHandler(users.show_operators, pattern="^manage_operators$"))
     app.add_handler(CallbackQueryHandler(users.delete_operator, pattern=r"^del_operator:"))
+
+    # Global error handler
+    app.add_error_handler(error_handler)
 
     # Start
     logger.info("Starting bot...")

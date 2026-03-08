@@ -1,8 +1,9 @@
 import logging
 import subprocess
+import ipaddress
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from handlers.menu import back_button
+from handlers.menu import back_button, require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def _get_banned_ips() -> list[dict]:
                     # Format varies, try to extract IP
                     parts = line.split()
                     for part in parts:
-                        if _is_ip(part):
+                        if _is_valid_ip(part):
                             banned.append({"ip": part, "source": "3xui-iplimit"})
                             break
     except FileNotFoundError:
@@ -53,14 +54,20 @@ def _get_banned_ips() -> list[dict]:
     return unique
 
 
-def _is_ip(s: str) -> bool:
-    parts = s.split(".")
-    if len(parts) == 4:
-        return all(p.isdigit() and 0 <= int(p) <= 255 for p in parts)
-    return ":" in s  # IPv6
+def _is_valid_ip(s: str) -> bool:
+    """Validate IP address using ipaddress module."""
+    try:
+        ipaddress.ip_address(s)
+        return True
+    except ValueError:
+        return False
 
 
 def _unban_ip(ip: str, source: str) -> bool:
+    if not _is_valid_ip(ip):
+        logger.warning(f"Invalid IP address for unban: {ip}")
+        return False
+
     try:
         if source == "fail2ban-ssh":
             subprocess.run(
@@ -87,6 +94,7 @@ def _unban_ip(ip: str, source: str) -> bool:
     return False
 
 
+@require_auth
 async def show_bans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -108,7 +116,7 @@ async def show_bans(update: Update, context: ContextTypes.DEFAULT_TYPE):
         source_label = "SSH" if "ssh" in b["source"] else "IP-лимит"
         text += f"{i+1}. <code>{b['ip']}</code> ({source_label})\n"
         buttons.append([InlineKeyboardButton(
-            f"🔓 Разбанить {b['ip']}", callback_data=f"unban:{b['ip']}:{b['source']}"
+            f"🔓 Разбанить {b['ip']}", callback_data=f"unban|{b['ip']}|{b['source']}"
         )])
 
     buttons.append([InlineKeyboardButton("🔓 Разбанить всех", callback_data="unban_all")])
@@ -117,6 +125,7 @@ async def show_bans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="HTML")
 
 
+@require_auth
 async def unban_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
 
@@ -137,9 +146,17 @@ async def unban_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    parts = query.data.split(":")
+    parts = query.data.split("|", 2)
+    if len(parts) != 3:
+        await query.answer("❌ Ошибка данных", show_alert=True)
+        return
+
     ip = parts[1]
     source = parts[2]
+
+    if not _is_valid_ip(ip):
+        await query.answer("❌ Некорректный IP", show_alert=True)
+        return
 
     await query.answer()
     if _unban_ip(ip, source):

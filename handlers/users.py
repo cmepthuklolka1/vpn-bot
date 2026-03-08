@@ -1,8 +1,9 @@
 import logging
+from html import escape
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from database import db
-from handlers.menu import back_button
+from handlers.menu import back_button, require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ async def show_operators(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if operators:
         for i, op in enumerate(operators, 1):
             name = op["name"] or "Без имени"
-            text += f"{i}. <b>{name}</b> (ID: <code>{op['telegram_id']}</code>)\n"
+            text += f"{i}. <b>{escape(name)}</b> (ID: <code>{op['telegram_id']}</code>)\n"
     else:
         text += "Операторов нет.\n"
 
@@ -65,6 +66,7 @@ async def add_operator_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ADD_OPERATOR_ID
 
 
+@require_admin
 async def add_operator_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         telegram_id = int(update.message.text.strip())
@@ -86,6 +88,7 @@ async def add_operator_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ADD_OPERATOR_NAME
 
 
+@require_admin
 async def add_operator_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
     telegram_id = context.user_data.get("new_operator_id")
@@ -93,7 +96,7 @@ async def add_operator_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add_operator(telegram_id, name, update.effective_user.id)
 
     await update.message.reply_text(
-        f"✅ Оператор добавлен: <b>{name}</b> (ID: <code>{telegram_id}</code>)",
+        f"✅ Оператор добавлен: <b>{escape(name)}</b> (ID: <code>{telegram_id}</code>)",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("👑 К операторам", callback_data="manage_operators")],
             [InlineKeyboardButton("◀️ Меню", callback_data="main_menu")],
@@ -119,7 +122,7 @@ async def delete_operator(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.answer()
     await query.edit_message_text(
-        f"🗑 Оператор <b>{name}</b> удалён.",
+        f"🗑 Оператор <b>{escape(name)}</b> удалён.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("👑 К операторам", callback_data="manage_operators")],
             [InlineKeyboardButton("◀️ Меню", callback_data="main_menu")],

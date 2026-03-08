@@ -2,7 +2,7 @@ import json
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
-from handlers.menu import back_button
+from handlers.menu import back_button, require_auth
 import logging
 
 logger = logging.getLogger(__name__)
@@ -11,12 +11,19 @@ EDIT_DEFAULT_VALUE = 10
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
 
+ALLOWED_FIELDS = {
+    "device_limit", "monthly_traffic_gb",
+    "speed_base_mbps", "speed_80pct_mbps", "speed_95pct_mbps",
+    "total_monthly_gb", "reset_day",
+}
+
 
 def save_config(config: dict):
     with open(CONFIG_PATH, "w") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
 
 
+@require_auth
 async def show_defaults(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -50,10 +57,16 @@ async def show_defaults(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="HTML")
 
 
+@require_auth
 async def edit_default_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     field = query.data.split(":")[1]
+
+    if field not in ALLOWED_FIELDS:
+        await query.edit_message_text("❌ Недопустимое поле.", reply_markup=back_button())
+        return ConversationHandler.END
+
     context.user_data["edit_default_field"] = field
 
     labels = {
@@ -70,10 +83,15 @@ async def edit_default_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return EDIT_DEFAULT_VALUE
 
 
+@require_auth
 async def edit_default_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     field = context.user_data.get("edit_default_field")
     config = context.bot_data["config"]
     value = update.message.text.strip()
+
+    if field not in ALLOWED_FIELDS:
+        await update.message.reply_text("❌ Недопустимое поле.", reply_markup=back_button())
+        return ConversationHandler.END
 
     try:
         if field in ("device_limit", "monthly_traffic_gb", "total_monthly_gb", "reset_day"):

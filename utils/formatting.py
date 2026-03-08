@@ -1,4 +1,5 @@
 from datetime import datetime
+from html import escape
 
 
 def format_status(data: dict) -> str:
@@ -9,7 +10,7 @@ def format_status(data: dict) -> str:
         online = "🟢" if c["is_online"] else "⚪"
         enabled = "" if c["enabled"] else " [ОТКЛ]"
         lines.append(
-            f"{online} <b>{c['email']}</b>{enabled}\n"
+            f"{online} <b>{escape(c['email'])}</b>{enabled}\n"
             f"   📦 {c['usage_gb']:.1f} ГБ / {c['limit_str']}  |  {c['speed_str']}"
         )
 
@@ -38,7 +39,7 @@ def format_client_info(client: dict, traffic: dict, eff_config: dict, ips: list,
     speed_95 = eff_config["speed_95pct_mbps"]
 
     lines = [
-        f"👤 <b>{client['email']}</b>",
+        f"👤 <b>{escape(client['email'])}</b>",
         "",
         f"📦 Трафик: {usage_gb:.2f} ГБ / {limit_str}",
         f"   ↑ {up / (1024**3):.2f} ГБ  |  ↓ {down / (1024**3):.2f} ГБ",
