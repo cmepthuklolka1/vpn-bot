@@ -1,0 +1,29 @@
+{
+    "telegram": {
+        "bot_token": "YOUR_BOT_TOKEN_HERE",
+        "admin_id": 0
+    },
+    "panel": {
+        "url": "https://YOUR_SERVER_IP:PANEL_PORT",
+        "base_path": "/YOUR_PANEL_PATH/",
+        "username": "admin",
+        "password": "admin",
+        "inbound_id": 1
+    },
+    "domain": "",
+    "defaults": {
+        "device_limit": 2,
+        "monthly_traffic_gb": 100,
+        "speed_base_mbps": 0,
+        "speed_80pct_mbps": 10,
+        "speed_95pct_mbps": 1
+    },
+    "limits": {
+        "total_monthly_gb": 3000,
+        "reset_day": 24
+    },
+    "monitoring": {
+        "check_interval_minutes": 5,
+        "status_update_minutes": 60
+    }
+}

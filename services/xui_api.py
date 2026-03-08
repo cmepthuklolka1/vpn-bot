@@ -1,0 +1,312 @@
+import aiohttp
+import json
+import ssl
+import logging
+import uuid as uuid_lib
+
+logger = logging.getLogger(__name__)
+
+
+class XUIApi:
+    def __init__(self, config: dict):
+        self.base_url = config["panel"]["url"].rstrip("/")
+        self.base_path = config["panel"]["base_path"].rstrip("/")
+        self.username = config["panel"]["username"]
+        self.password = config["panel"]["password"]
+        self.inbound_id = config["panel"]["inbound_id"]
+        self.domain = config.get("domain") or None
+        self.cookie = None
+        self._session = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+            connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+            self._session = aiohttp.ClientSession(connector=connector)
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+
+    def _api_url(self, path: str) -> str:
+        return f"{self.base_url}{self.base_path}/panel/api/inbounds{path}"
+
+    def _login_url(self) -> str:
+        return f"{self.base_url}{self.base_path}/login"
+
+    async def login(self) -> bool:
+        session = await self._get_session()
+        try:
+            async with session.post(self._login_url(), json={
+                "username": self.username,
+                "password": self.password
+            }) as resp:
+                data = await resp.json()
+                if data.get("success"):
+                    cookies = resp.cookies
+                    for key, cookie in cookies.items():
+                        if "3x-ui" in key.lower() or "session" in key.lower():
+                            self.cookie = f"{key}={cookie.value}"
+                            break
+                    if not self.cookie and cookies:
+                        first = list(cookies.items())[0]
+                        self.cookie = f"{first[0]}={first[1].value}"
+                    # Also try Set-Cookie header
+                    if not self.cookie:
+                        sc = resp.headers.get("Set-Cookie", "")
+                        if sc:
+                            self.cookie = sc.split(";")[0]
+                    logger.info("Login successful")
+                    return True
+                logger.error(f"Login failed: {data}")
+                return False
+        except Exception as e:
+            logger.error(f"Login error: {e}")
+            return False
+
+    async def _request(self, method: str, path: str, **kwargs) -> dict | None:
+        if not self.cookie:
+            if not await self.login():
+                return None
+
+        session = await self._get_session()
+        headers = {"Cookie": self.cookie}
+
+        try:
+            async with session.request(method, self._api_url(path), headers=headers, **kwargs) as resp:
+                if resp.status == 401 or resp.status == 307:
+                    # Session expired, re-login
+                    self.cookie = None
+                    if await self.login():
+                        headers = {"Cookie": self.cookie}
+                        async with session.request(method, self._api_url(path), headers=headers, **kwargs) as resp2:
+                            return await resp2.json()
+                    return None
+                return await resp.json()
+        except Exception as e:
+            logger.error(f"API request error {path}: {e}")
+            return None
+
+    # --- Inbounds ---
+
+    async def list_inbounds(self) -> list | None:
+        data = await self._request("GET", "/list")
+        if data and data.get("success"):
+            return data.get("obj", [])
+        return None
+
+    async def get_inbound(self, inbound_id: int = None) -> dict | None:
+        iid = inbound_id or self.inbound_id
+        data = await self._request("GET", f"/get/{iid}")
+        if data and data.get("success"):
+            return data.get("obj")
+        return None
+
+    # --- Clients ---
+
+    async def get_clients(self, inbound_id: int = None) -> list:
+        inbound = await self.get_inbound(inbound_id)
+        if not inbound:
+            return []
+        settings = json.loads(inbound.get("settings", "{}"))
+        return settings.get("clients", [])
+
+    async def add_client(self, email: str, device_limit: int = 2,
+                         total_gb: int = 0, flow: str = "xtls-rprx-vision") -> dict | None:
+        client_uuid = str(uuid_lib.uuid4())
+        sub_id = uuid_lib.uuid4().hex[:16]
+
+        client = {
+            "id": client_uuid,
+            "flow": flow,
+            "email": email,
+            "limitIp": device_limit,
+            "totalGB": total_gb * 1024 * 1024 * 1024 if total_gb > 0 else 0,
+            "expiryTime": 0,
+            "enable": True,
+            "tgId": "",
+            "subId": sub_id,
+            "reset": 0
+        }
+
+        payload = {
+            "id": self.inbound_id,
+            "settings": json.dumps({"clients": [client]})
+        }
+
+        data = await self._request("POST", "/addClient", json=payload)
+        if data and data.get("success"):
+            logger.info(f"Client {email} added with UUID {client_uuid}")
+            return client
+        logger.error(f"Failed to add client {email}: {data}")
+        return None
+
+    async def update_client(self, client_uuid: str, updates: dict) -> bool:
+        inbound = await self.get_inbound()
+        if not inbound:
+            return False
+
+        settings = json.loads(inbound.get("settings", "{}"))
+        clients = settings.get("clients", [])
+
+        client = None
+        for c in clients:
+            if c["id"] == client_uuid:
+                client = c
+                break
+
+        if not client:
+            logger.error(f"Client UUID {client_uuid} not found")
+            return False
+
+        client.update(updates)
+
+        payload = {
+            "id": self.inbound_id,
+            "settings": json.dumps({"clients": [client]})
+        }
+
+        data = await self._request("POST", f"/updateClient/{client_uuid}", json=payload)
+        if data and data.get("success"):
+            return True
+        logger.error(f"Failed to update client {client_uuid}: {data}")
+        return False
+
+    async def delete_client(self, client_uuid: str) -> bool:
+        data = await self._request("POST", f"/{self.inbound_id}/delClient/{client_uuid}")
+        if data and data.get("success"):
+            return True
+        logger.error(f"Failed to delete client {client_uuid}: {data}")
+        return False
+
+    async def enable_client(self, client_uuid: str, enable: bool) -> bool:
+        return await self.update_client(client_uuid, {"enable": enable})
+
+    # --- Traffic ---
+
+    async def get_client_traffic(self, email: str) -> dict | None:
+        data = await self._request("GET", f"/getClientTraffics/{email}")
+        if data and data.get("success") and data.get("obj"):
+            obj = data["obj"]
+            if isinstance(obj, list):
+                # Find the one matching our inbound
+                for item in obj:
+                    if item.get("email") == email:
+                        return item
+                return obj[0] if obj else None
+            return obj
+        return None
+
+    async def get_all_client_traffics(self) -> list:
+        """Get traffic for all clients by iterating."""
+        clients = await self.get_clients()
+        traffics = []
+        for client in clients:
+            traffic = await self.get_client_traffic(client["email"])
+            if traffic:
+                traffics.append(traffic)
+        return traffics
+
+    async def reset_client_traffic(self, email: str) -> bool:
+        data = await self._request("POST", f"/{self.inbound_id}/resetClientTraffic/{email}")
+        if data and data.get("success"):
+            return True
+        return False
+
+    async def reset_all_traffics(self) -> bool:
+        data = await self._request("POST", "/resetAllTraffics")
+        if data and data.get("success"):
+            return True
+        return False
+
+    # --- Client IPs ---
+
+    async def get_client_ips(self, email: str) -> list:
+        data = await self._request("POST", f"/clientIps/{email}")
+        if data and data.get("success"):
+            obj = data.get("obj", "")
+            if isinstance(obj, str):
+                if obj and obj != "No IP Record":
+                    return [ip.strip() for ip in obj.split(",") if ip.strip()]
+                return []
+            if isinstance(obj, list):
+                return obj
+        return []
+
+    async def clear_client_ips(self, email: str) -> bool:
+        data = await self._request("POST", f"/clearClientIps/{email}")
+        return data and data.get("success", False)
+
+    # --- Online Clients ---
+
+    async def get_online_clients(self) -> list:
+        data = await self._request("POST", "/onlines")
+        if data and data.get("success"):
+            return data.get("obj", []) or []
+        return []
+
+    # --- VLESS Key Generation ---
+
+    def _get_connection_address(self, inbound: dict) -> str:
+        """Determine connection address for VLESS URI from inbound settings."""
+        if self.domain:
+            return self.domain
+
+        listen = inbound.get("listen", "")
+        if listen and listen not in ("0.0.0.0", "::"):
+            return listen
+
+        stream = json.loads(inbound.get("streamSettings", "{}"))
+        reality = stream.get("realitySettings", {})
+
+        server_names = reality.get("serverNames", [])
+        if server_names:
+            return server_names[0]
+
+        dest = reality.get("dest", "")
+        if dest:
+            return dest.split(":")[0] if ":" in dest else dest
+
+        logger.warning("Could not determine connection address from inbound settings")
+        return "localhost"
+
+    async def generate_vless_key(self, client_uuid: str, email: str) -> str | None:
+        inbound = await self.get_inbound()
+        if not inbound:
+            return None
+
+        stream = json.loads(inbound.get("streamSettings", "{}"))
+        reality = stream.get("realitySettings", {})
+
+        pbk = reality.get("settings", {}).get("publicKey", "")
+        if not pbk:
+            pbk = reality.get("publicKey", "")
+
+        short_ids = reality.get("shortIds", [])
+        sid = short_ids[0] if short_ids else ""
+
+        server_names = reality.get("serverNames", [])
+        sni = server_names[0] if server_names else ""
+
+        port = inbound.get("port", 443)
+        address = self._get_connection_address(inbound)
+
+        key = (
+            f"vless://{client_uuid}@{address}:{port}"
+            f"?type=tcp&security=reality"
+            f"&pbk={pbk}&fp=chrome"
+            f"&sni={sni}&sid={sid}"
+            f"&spx=%2F&flow=xtls-rprx-vision"
+            f"#{email}"
+        )
+        return key
+
+    # --- Sync existing clients ---
+
+    async def sync_existing_clients(self) -> list:
+        """Get all existing clients from the inbound."""
+        clients = await self.get_clients()
+        return clients
