@@ -24,6 +24,9 @@ async def create_client_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     await query.edit_message_text(
         "➕ <b>Создание подключения</b>\n\nВведите имя для нового клиента:",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("❌ Отмена", callback_data="main_menu")
+        ]]),
         parse_mode="HTML"
     )
     return ENTER_NAME
@@ -35,8 +38,8 @@ async def create_client_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
     api = context.bot_data["api"]
     name = update.message.text.strip()
 
-    if not re.match(r'^[a-zA-Z0-9_\-\.]+$', name):
-        await update.message.reply_text("❌ Имя может содержать только латиницу, цифры, _, -, точку. Попробуйте снова:")
+    if not re.match(r'^[a-zA-Z0-9а-яА-ЯёЁ_\-\.]+$', name):
+        await update.message.reply_text("❌ Имя может содержать только буквы, цифры, _, -, точку. Попробуйте снова:")
         return ENTER_NAME
 
     if not name or len(name) > 50:
@@ -361,8 +364,8 @@ async def client_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if action == "email":
             # Validate new name
-            if not re.match(r'^[a-zA-Z0-9_\-\.]+$', value):
-                await update.message.reply_text("❌ Имя может содержать только латиницу, цифры, _, -, точку:")
+            if not re.match(r'^[a-zA-Z0-9а-яА-ЯёЁ_\-\.]+$', value):
+                await update.message.reply_text("❌ Имя может содержать только буквы, цифры, _, -, точку:")
                 return EDIT_VALUE
             # Rename client
             clients = await api.get_clients()

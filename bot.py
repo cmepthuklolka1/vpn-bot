@@ -199,6 +199,7 @@ def main():
         fallbacks=[CommandHandler("cancel", clients.create_client_cancel)],
         per_message=False,
         conversation_timeout=300,
+        allow_reentry=True,
     )
 
     # --- Conversation: Edit Client Field ---
@@ -214,6 +215,7 @@ def main():
         fallbacks=[CommandHandler("cancel", clients.create_client_cancel)],
         per_message=False,
         conversation_timeout=300,
+        allow_reentry=True,
     )
 
     # --- Conversation: Edit Defaults ---
@@ -227,6 +229,7 @@ def main():
         fallbacks=[CommandHandler("cancel", clients.create_client_cancel)],
         per_message=False,
         conversation_timeout=300,
+        allow_reentry=True,
     )
 
     # --- Conversation: Add Operator ---
@@ -243,6 +246,7 @@ def main():
         fallbacks=[CommandHandler("cancel", users.add_operator_cancel)],
         per_message=False,
         conversation_timeout=300,
+        allow_reentry=True,
     )
 
     # Register handlers (order matters!)
