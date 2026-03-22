@@ -239,10 +239,11 @@ class XUIApi:
             obj = data.get("obj", "")
             if isinstance(obj, str):
                 if obj and obj != "No IP Record":
-                    return [ip.strip() for ip in obj.split(",") if ip.strip()]
+                    return [ip.strip().split(" ")[0] for ip in obj.split(",") if ip.strip()]
                 return []
             if isinstance(obj, list):
-                return obj
+                # Items can be "IP (date)" format — extract just the IP
+                return [item.split(" ")[0] for item in obj if item]
         return []
 
     async def clear_client_ips(self, email: str) -> bool:
