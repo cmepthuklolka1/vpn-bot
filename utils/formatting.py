@@ -9,8 +9,9 @@ def format_status(data: dict) -> str:
     for c in data["clients"]:
         online = "🟢" if c["is_online"] else "⚪"
         enabled = "" if c["enabled"] else " [ОТКЛ]"
+        prefix = c.get("inbound_label", "")
         lines.append(
-            f"{online} <b>{escape(c['email'])}</b>{enabled}\n"
+            f"{online} <b>{prefix}{escape(c['email'])}</b>{enabled}\n"
             f"   📦 {c['usage_gb']:.1f} ГБ / {c['limit_str']}  |  {c['speed_str']}"
         )
 
@@ -26,7 +27,7 @@ def format_status(data: dict) -> str:
     return "\n".join(lines)
 
 
-def format_client_info(client: dict, traffic: dict, eff_config: dict, ips: list, is_online: bool) -> str:
+def format_client_info(client: dict, traffic: dict, eff_config: dict, ips: list, is_online: bool, inbound_label: str = "") -> str:
     """Format detailed client info."""
     up = traffic.get("up", 0) if traffic else 0
     down = traffic.get("down", 0) if traffic else 0
@@ -38,8 +39,9 @@ def format_client_info(client: dict, traffic: dict, eff_config: dict, ips: list,
     speed_80 = eff_config["speed_80pct_mbps"]
     speed_95 = eff_config["speed_95pct_mbps"]
 
+    inbound_suffix = f" ({inbound_label})" if inbound_label else ""
     lines = [
-        f"👤 <b>{escape(client['email'])}</b>",
+        f"👤 <b>{escape(client['email'])}</b>{inbound_suffix}",
         "",
         f"📦 Трафик: {usage_gb:.2f} ГБ / {limit_str}",
         f"   ↑ {up / (1024**3):.2f} ГБ  |  ↓ {down / (1024**3):.2f} ГБ",

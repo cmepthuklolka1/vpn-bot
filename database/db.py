@@ -62,6 +62,14 @@ def init_db():
         );
     """)
     conn.commit()
+
+    # Migrations
+    try:
+        conn.execute("ALTER TABLE client_config ADD COLUMN inbound_id INTEGER DEFAULT NULL")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
+
     conn.close()
 
 
@@ -143,6 +151,11 @@ def delete_client_config(email: str):
     conn.execute("DELETE FROM client_config WHERE email = ?", (email,))
     conn.commit()
     conn.close()
+
+
+def get_client_inbound_id(email: str) -> int | None:
+    cfg = get_client_config(email)
+    return cfg["inbound_id"] if cfg else None
 
 
 def get_effective_config(email: str, defaults: dict) -> dict:

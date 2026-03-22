@@ -13,7 +13,7 @@ class XUIApi:
         self.base_path = config["panel"]["base_path"].rstrip("/")
         self.username = config["panel"]["username"]
         self.password = config["panel"]["password"]
-        self.inbound_id = config["panel"]["inbound_id"]
+        self.inbound_id = config["panel"].get("inbound_id")
         self.domain = config.get("domain") or None
         self.cookie = None
         self._session = None
@@ -115,7 +115,13 @@ class XUIApi:
         return settings.get("clients", [])
 
     async def add_client(self, email: str, device_limit: int = 2,
-                         total_gb: int = 0, flow: str = "xtls-rprx-vision") -> dict | None:
+                         total_gb: int = 0, flow: str = "xtls-rprx-vision",
+                         inbound_id: int = None) -> dict | None:
+        iid = inbound_id or self.inbound_id
+        if not iid:
+            logger.error("No inbound_id specified for add_client")
+            return None
+
         client_uuid = str(uuid_lib.uuid4())
         sub_id = uuid_lib.uuid4().hex[:16]
 
@@ -133,7 +139,7 @@ class XUIApi:
         }
 
         payload = {
-            "id": self.inbound_id,
+            "id": iid,
             "settings": json.dumps({"clients": [client]})
         }
 
@@ -144,8 +150,9 @@ class XUIApi:
         logger.error(f"Failed to add client {email}: {data}")
         return None
 
-    async def update_client(self, client_uuid: str, updates: dict) -> bool:
-        inbound = await self.get_inbound()
+    async def update_client(self, client_uuid: str, updates: dict, inbound_id: int = None) -> bool:
+        iid = inbound_id or self.inbound_id
+        inbound = await self.get_inbound(iid)
         if not inbound:
             return False
 
@@ -165,7 +172,7 @@ class XUIApi:
         client.update(updates)
 
         payload = {
-            "id": self.inbound_id,
+            "id": inbound.get("id", iid),
             "settings": json.dumps({"clients": [client]})
         }
 
@@ -175,15 +182,16 @@ class XUIApi:
         logger.error(f"Failed to update client {client_uuid}: {data}")
         return False
 
-    async def delete_client(self, client_uuid: str) -> bool:
-        data = await self._request("POST", f"/{self.inbound_id}/delClient/{client_uuid}")
+    async def delete_client(self, client_uuid: str, inbound_id: int = None) -> bool:
+        iid = inbound_id or self.inbound_id
+        data = await self._request("POST", f"/{iid}/delClient/{client_uuid}")
         if data and data.get("success"):
             return True
         logger.error(f"Failed to delete client {client_uuid}: {data}")
         return False
 
-    async def enable_client(self, client_uuid: str, enable: bool) -> bool:
-        return await self.update_client(client_uuid, {"enable": enable})
+    async def enable_client(self, client_uuid: str, enable: bool, inbound_id: int = None) -> bool:
+        return await self.update_client(client_uuid, {"enable": enable}, inbound_id=inbound_id)
 
     # --- Traffic ---
 
@@ -210,8 +218,9 @@ class XUIApi:
                 traffics.append(traffic)
         return traffics
 
-    async def reset_client_traffic(self, email: str) -> bool:
-        data = await self._request("POST", f"/{self.inbound_id}/resetClientTraffic/{email}")
+    async def reset_client_traffic(self, email: str, inbound_id: int = None) -> bool:
+        iid = inbound_id or self.inbound_id
+        data = await self._request("POST", f"/{iid}/resetClientTraffic/{email}")
         if data and data.get("success"):
             return True
         return False
@@ -273,8 +282,8 @@ class XUIApi:
         logger.warning("Could not determine connection address from inbound settings")
         return "localhost"
 
-    async def generate_vless_key(self, client_uuid: str, email: str) -> str | None:
-        inbound = await self.get_inbound()
+    async def generate_vless_key(self, client_uuid: str, email: str, inbound_id: int = None) -> str | None:
+        inbound = await self.get_inbound(inbound_id)
         if not inbound:
             return None
 
@@ -304,9 +313,28 @@ class XUIApi:
         )
         return key
 
+    # --- All inbounds ---
+
+    async def get_all_clients(self) -> list[tuple[int, str, list]]:
+        """Returns [(inbound_id, remark, [clients]), ...] sorted by inbound id."""
+        inbounds = await self.list_inbounds()
+        if not inbounds:
+            return []
+        result = []
+        for ib in sorted(inbounds, key=lambda x: x["id"]):
+            settings = json.loads(ib.get("settings", "{}"))
+            clients = settings.get("clients", [])
+            result.append((ib["id"], ib.get("remark", f"Inbound {ib['id']}"), clients))
+        return result
+
     # --- Sync existing clients ---
 
     async def sync_existing_clients(self) -> list:
-        """Get all existing clients from the inbound."""
-        clients = await self.get_clients()
-        return clients
+        """Get all existing clients from all inbounds."""
+        all_clients = await self.get_all_clients()
+        result = []
+        for iid, remark, clients in all_clients:
+            for c in clients:
+                c["_inbound_id"] = iid
+                result.append(c)
+        return result

@@ -53,30 +53,38 @@ async def sync_existing_clients(api: XUIApi, config: dict):
     """
     Sync existing 3X-UI clients into our database.
     Existing clients not in our DB get is_unlimited=1.
+    Assigns inbound_id to all clients.
     """
-    clients_list = await api.sync_existing_clients()
-    if not clients_list:
+    all_inbounds = await api.get_all_clients()
+    if not all_inbounds:
         logger.info("No existing clients found in 3X-UI")
         return
 
     synced = 0
-    for client in clients_list:
-        email = client.get("email", "")
-        if not email:
-            continue
+    total = 0
+    for iid, remark, clients_list in all_inbounds:
+        for client in clients_list:
+            email = client.get("email", "")
+            if not email:
+                continue
+            total += 1
 
-        existing = db.get_client_config(email)
-        if not existing:
-            db.upsert_client_config(
-                email=email,
-                uuid=client.get("id", ""),
-                is_unlimited=1,
-                device_limit=client.get("limitIp", 2),
-            )
-            synced += 1
-            logger.debug(f"Synced existing client: {email} (unlimited)")
+            existing = db.get_client_config(email)
+            if not existing:
+                db.upsert_client_config(
+                    email=email,
+                    uuid=client.get("id", ""),
+                    is_unlimited=1,
+                    device_limit=client.get("limitIp", 2),
+                    inbound_id=iid,
+                )
+                synced += 1
+                logger.debug(f"Synced existing client: {email} (unlimited, inbound {iid})")
+            elif not existing.get("inbound_id"):
+                # Migration: assign inbound_id to old clients
+                db.upsert_client_config(email, inbound_id=iid)
 
-    logger.info(f"Sync complete: {synced} new clients added, {len(clients_list)} total in 3X-UI")
+    logger.info(f"Sync complete: {synced} new clients added, {total} total in 3X-UI")
 
 
 async def post_init(application: Application):
@@ -192,6 +200,9 @@ def main():
     create_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(clients.create_client_start, pattern="^create_client$")],
         states={
+            clients.SELECT_INBOUND: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, clients.create_client_inbound)
+            ],
             clients.ENTER_NAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, clients.create_client_name)
             ],
@@ -205,7 +216,7 @@ def main():
     # --- Conversation: Edit Client Field ---
     edit_client_conv = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(clients.client_edit_action, pattern=r"^cedit:(email|traffic|devices|speeds):"),
+            CallbackQueryHandler(clients.client_edit_action, pattern=r"^cedit:(email|traffic|devices|speeds):\d+:"),
         ],
         states={
             clients.EDIT_VALUE: [
@@ -263,7 +274,7 @@ def main():
     # Quick actions for clients (no conversation needed)
     app.add_handler(CallbackQueryHandler(
         clients.client_edit_action,
-        pattern=r"^cedit:(toggle_override|toggle_enable|reset_traffic|delete|confirm_delete|show_key):"
+        pattern=r"^cedit:(toggle_override|toggle_enable|reset_traffic|delete|confirm_delete|show_key):\d+:"
     ))
 
     # Menu navigation
@@ -273,7 +284,7 @@ def main():
     app.add_handler(CallbackQueryHandler(status.pin_status, pattern="^pin_status$"))
     app.add_handler(CallbackQueryHandler(status.refresh_pinned, pattern="^refresh_pinned$"))
     app.add_handler(CallbackQueryHandler(clients.manage_client_list, pattern="^manage_client$"))
-    app.add_handler(CallbackQueryHandler(clients.client_detail, pattern=r"^client_detail:"))
+    app.add_handler(CallbackQueryHandler(clients.client_detail, pattern=r"^client_detail:\d+:"))
     app.add_handler(CallbackQueryHandler(config_template.show_defaults, pattern="^edit_defaults$"))
     app.add_handler(CallbackQueryHandler(bans.show_bans, pattern="^bans$"))
     app.add_handler(CallbackQueryHandler(bans.unban_action, pattern=r"^unban"))
