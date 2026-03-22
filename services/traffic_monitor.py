@@ -205,6 +205,14 @@ async def get_status_data(api, config: dict) -> dict:
             if total_inbounds > 1:
                 inbound_label = f"[{idx}. {remark}] "
 
+            # Get connected IPs count
+            connected_ips = 0
+            if is_online:
+                ips = await api.get_client_ips(email)
+                connected_ips = len(ips)
+
+            device_limit = client.get("limitIp", 0)
+
             client_data.append({
                 "email": email,
                 "usage_gb": bytes_to_gb(usage),
@@ -213,6 +221,8 @@ async def get_status_data(api, config: dict) -> dict:
                 "is_online": is_online,
                 "enabled": client.get("enable", True),
                 "inbound_label": inbound_label,
+                "connected_ips": connected_ips,
+                "device_limit": device_limit,
             })
 
     return {

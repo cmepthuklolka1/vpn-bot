@@ -10,9 +10,15 @@ def format_status(data: dict) -> str:
         online = "🟢" if c["is_online"] else "⚪"
         enabled = "" if c["enabled"] else " [ОТКЛ]"
         prefix = c.get("inbound_label", "")
+
+        # Device count: connected[limit]
+        connected = c.get("connected_ips", 0)
+        dev_limit = c.get("device_limit", 0)
+        devices_str = f"{connected}[{dev_limit}]" if dev_limit > 0 else f"{connected}[∞]"
+
         lines.append(
             f"{online} <b>{prefix}{escape(c['email'])}</b>{enabled}\n"
-            f"   📦 {c['usage_gb']:.1f} ГБ / {c['limit_str']}  |  {c['speed_str']}"
+            f"   📦 {c['usage_gb']:.1f} ГБ / {c['limit_str']}  |  {c['speed_str']}  |  📱 {devices_str}"
         )
 
     lines.append("")
@@ -27,7 +33,7 @@ def format_status(data: dict) -> str:
     return "\n".join(lines)
 
 
-def format_client_info(client: dict, traffic: dict, eff_config: dict, ips: list, is_online: bool, inbound_label: str = "") -> str:
+def format_client_info(client: dict, traffic: dict, eff_config: dict, ips: list, is_online: bool, inbound_label: str = "", connected_count: int = None) -> str:
     """Format detailed client info."""
     up = traffic.get("up", 0) if traffic else 0
     down = traffic.get("down", 0) if traffic else 0
@@ -45,7 +51,7 @@ def format_client_info(client: dict, traffic: dict, eff_config: dict, ips: list,
         "",
         f"📦 Трафик: {usage_gb:.2f} ГБ / {limit_str}",
         f"   ↑ {up / (1024**3):.2f} ГБ  |  ↓ {down / (1024**3):.2f} ГБ",
-        f"📱 Устройств: {client.get('limitIp', 0)}",
+        f"📱 Устройств: {connected_count if connected_count is not None else len(ips)} / {client.get('limitIp', 0) or '∞'}",
         f"🌐 Онлайн: {'Да' if is_online else 'Нет'}",
         f"✅ Включён: {'Да' if client.get('enable', True) else 'Нет'}",
         "",
