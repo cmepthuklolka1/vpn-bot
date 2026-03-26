@@ -49,22 +49,35 @@ async def monthly_reset_job(context):
     logger.info("Starting monthly traffic reset...")
 
     try:
-        await monthly_reset(api, config)
-        db.set_notified(today_key)
+        success = await monthly_reset(api, config)
 
-        # Notify admin
         admin_id = config["telegram"]["admin_id"]
         period = datetime.now().strftime("%Y-%m")
-        try:
-            await context.bot.send_message(
-                admin_id,
-                f"🔄 <b>Месячный сброс выполнен</b>\n"
-                f"Период: {period}\n"
-                f"Трафик и ограничения скорости сброшены.",
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
+
+        if success:
+            db.set_notified(today_key)
+            try:
+                await context.bot.send_message(
+                    admin_id,
+                    f"🔄 <b>Месячный сброс выполнен</b>\n"
+                    f"Период: {period}\n"
+                    f"Трафик и ограничения скорости сброшены.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+        else:
+            logger.error("Monthly reset: panel API returned failure, will retry next run")
+            try:
+                await context.bot.send_message(
+                    admin_id,
+                    f"⚠️ <b>Ошибка месячного сброса</b>\n"
+                    f"Период: {period}\n"
+                    f"Не удалось сбросить трафик на панели. Повторная попытка при следующем запуске.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
 
     except Exception as e:
         logger.error(f"Monthly reset failed: {e}")

@@ -229,6 +229,7 @@ class XUIApi:
         data = await self._request("POST", "/resetAllTraffics")
         if data and data.get("success"):
             return True
+        logger.error(f"reset_all_traffics failed: {data}")
         return False
 
     # --- Client IPs ---

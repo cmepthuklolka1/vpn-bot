@@ -114,10 +114,11 @@ async def check_and_apply_limits(api, config: dict, bot=None, notify_chat_ids: l
     return total_usage_bytes
 
 
-async def monthly_reset(api, config: dict):
+async def monthly_reset(api, config: dict) -> bool:
     """
     Reset traffic on the configured day.
     Archives current traffic before reset.
+    Returns True if reset succeeded, False otherwise.
     """
     period = datetime.now().strftime("%Y-%m")
     all_inbounds = await api.get_all_clients()
@@ -135,7 +136,10 @@ async def monthly_reset(api, config: dict):
                 )
 
     # Reset all traffic in 3X-UI
-    await api.reset_all_traffics()
+    success = await api.reset_all_traffics()
+    if not success:
+        logger.error("Failed to reset traffics via panel API")
+        return False
 
     # Clear notification states
     db.clear_notifications()
@@ -145,6 +149,7 @@ async def monthly_reset(api, config: dict):
     await speed_limiter.init_tc()
 
     logger.info(f"Monthly reset completed for period {period}")
+    return True
 
 
 async def get_status_data(api, config: dict) -> dict:
