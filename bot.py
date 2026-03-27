@@ -62,7 +62,7 @@ async def sync_existing_clients(api: XUIApi, config: dict):
 
     synced = 0
     total = 0
-    for iid, remark, clients_list in all_inbounds:
+    for iid, remark, port, clients_list in all_inbounds:
         for client in clients_list:
             email = client.get("email", "")
             if not email:

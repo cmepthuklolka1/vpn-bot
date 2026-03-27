@@ -317,8 +317,8 @@ class XUIApi:
 
     # --- All inbounds ---
 
-    async def get_all_clients(self) -> list[tuple[int, str, list]]:
-        """Returns [(inbound_id, remark, [clients]), ...] sorted by inbound id."""
+    async def get_all_clients(self) -> list[tuple[int, str, int, list]]:
+        """Returns [(inbound_id, remark, port, [clients]), ...] sorted by inbound id."""
         inbounds = await self.list_inbounds()
         if not inbounds:
             return []
@@ -326,7 +326,7 @@ class XUIApi:
         for ib in sorted(inbounds, key=lambda x: x["id"]):
             settings = json.loads(ib.get("settings", "{}"))
             clients = settings.get("clients", [])
-            result.append((ib["id"], ib.get("remark", f"Inbound {ib['id']}"), clients))
+            result.append((ib["id"], ib.get("remark", f"Inbound {ib['id']}"), ib.get("port", 0), clients))
         return result
 
     # --- Sync existing clients ---
@@ -335,7 +335,7 @@ class XUIApi:
         """Get all existing clients from all inbounds."""
         all_clients = await self.get_all_clients()
         result = []
-        for iid, remark, clients in all_clients:
+        for iid, remark, port, clients in all_clients:
             for c in clients:
                 c["_inbound_id"] = iid
                 result.append(c)

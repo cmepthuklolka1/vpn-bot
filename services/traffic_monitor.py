@@ -1,9 +1,32 @@
 import logging
+import subprocess
 from datetime import datetime
 from database import db
 from services import speed_limiter
 
 logger = logging.getLogger(__name__)
+
+
+def _get_active_ips(port: int) -> set:
+    """Get currently connected IPs to a specific port via ss."""
+    if not port:
+        return set()
+    try:
+        result = subprocess.run(
+            ["ss", "-tn", "state", "established", f"sport = :{port}"],
+            capture_output=True, text=True, timeout=5
+        )
+        ips = set()
+        for line in result.stdout.strip().split("\n")[1:]:
+            parts = line.split()
+            if len(parts) >= 4:
+                peer = parts[3]
+                ip = peer.rsplit(":", 1)[0]
+                ips.add(ip)
+        return ips
+    except Exception as e:
+        logger.debug(f"Failed to get active IPs for port {port}: {e}")
+        return set()
 
 
 def bytes_to_gb(b: int) -> float:
@@ -22,7 +45,7 @@ async def check_and_apply_limits(api, config: dict, bot=None, notify_chat_ids: l
 
     total_usage_bytes = 0
 
-    for iid, remark, clients in all_inbounds:
+    for iid, remark, port, clients in all_inbounds:
         for client in clients:
             email = client["email"]
             client_uuid = client["id"]
@@ -124,7 +147,7 @@ async def monthly_reset(api, config: dict) -> bool:
     all_inbounds = await api.get_all_clients()
 
     # Archive current traffic
-    for iid, remark, clients in all_inbounds:
+    for iid, remark, port, clients in all_inbounds:
         for client in clients:
             email = client["email"]
             traffic = await api.get_client_traffic(email)
@@ -173,7 +196,15 @@ async def get_status_data(api, config: dict) -> dict:
     client_data = []
     total_usage = 0
 
-    for idx, (iid, remark, clients) in enumerate(all_inbounds, 1):
+    # Pre-fetch active IPs per inbound port
+    active_ips_by_port = {}
+    for iid, remark, port, clients in all_inbounds:
+        if port and port not in active_ips_by_port:
+            active_ips_by_port[port] = _get_active_ips(port)
+
+    for idx, (iid, remark, port, clients) in enumerate(all_inbounds, 1):
+        active_ips = active_ips_by_port.get(port, set())
+
         for client in clients:
             email = client["email"]
             traffic = await api.get_client_traffic(email)
@@ -210,11 +241,11 @@ async def get_status_data(api, config: dict) -> dict:
             if total_inbounds > 1:
                 inbound_label = f"[{idx}. {remark}] "
 
-            # Get connected IPs count
+            # Get connected IPs count (cross-reference historical IPs with active TCP connections)
             connected_ips = 0
             if is_online:
-                ips = await api.get_client_ips(email)
-                connected_ips = len(ips)
+                client_ips = await api.get_client_ips(email)
+                connected_ips = len(set(client_ips) & active_ips) if client_ips else 0
 
             device_limit = client.get("limitIp", 0)
 

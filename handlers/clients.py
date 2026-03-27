@@ -39,7 +39,7 @@ async def create_client_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if len(all_inbounds) == 1:
         # Single inbound — skip selection
-        iid, remark, _ = all_inbounds[0]
+        iid, remark, _port, _ = all_inbounds[0]
         context.user_data["selected_inbound_id"] = iid
         context.user_data["selected_inbound_remark"] = remark
         await query.edit_message_text(
@@ -54,7 +54,7 @@ async def create_client_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Multiple inbounds — ask user to choose
     lines = ["➕ <b>Выберите подключение:</b>\n"]
     context.user_data["inbound_list"] = []
-    for idx, (iid, remark, _) in enumerate(all_inbounds, 1):
+    for idx, (iid, remark, _port, _) in enumerate(all_inbounds, 1):
         lines.append(f"<b>{idx}.</b> {escape(remark)}")
         context.user_data["inbound_list"].append((iid, remark))
     lines.append("\nВведите номер подключения:")
@@ -121,7 +121,7 @@ async def create_client_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # Check if name already exists across all inbounds
     all_clients = await api.get_all_clients()
-    for _, _, clients in all_clients:
+    for _, _, _port, clients in all_clients:
         for c in clients:
             if c["email"].lower() == name.lower():
                 await update.message.reply_text(f"❌ Клиент <code>{escape(name)}</code> уже существует. Введите другое имя:", parse_mode="HTML")
@@ -212,7 +212,7 @@ async def manage_client_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     buttons = []
     has_clients = False
-    for idx, (iid, remark, clients) in enumerate(all_inbounds, 1):
+    for idx, (iid, remark, port, clients) in enumerate(all_inbounds, 1):
         for c in clients:
             has_clients = True
             email = c["email"]
@@ -261,7 +261,7 @@ async def client_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inbound_remark = ""
     all_inbounds = await api.get_all_clients()
     total_inbounds = len(all_inbounds)
-    for idx, (iid, remark, clients) in enumerate(all_inbounds, 1):
+    for idx, (iid, remark, port, clients) in enumerate(all_inbounds, 1):
         if inbound_id and iid != inbound_id:
             continue
         for c in clients:
