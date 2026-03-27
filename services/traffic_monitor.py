@@ -202,9 +202,30 @@ async def get_status_data(api, config: dict) -> dict:
         if port and port not in active_ips_by_port:
             active_ips_by_port[port] = _get_active_ips(port)
 
-    for idx, (iid, remark, port, clients) in enumerate(all_inbounds, 1):
+    # Collect IP claims from all online clients, then assign each shared IP
+    # to the client with the most recent date (avoids double-counting behind NAT)
+    ip_claims = {}  # {ip: [(email, date_str), ...]}
+    for iid, remark, port, clients in all_inbounds:
         active_ips = active_ips_by_port.get(port, set())
+        for client in clients:
+            email = client["email"]
+            if email not in online_emails:
+                continue
+            ips_with_dates = await api.get_client_ips_with_dates(email)
+            for ip, date_str in ips_with_dates.items():
+                if ip in active_ips:
+                    ip_claims.setdefault(ip, []).append((email, date_str))
 
+    # Assign each active IP to one client (most recent date wins)
+    assigned_ips = {}  # {email: count}
+    for ip, claims in ip_claims.items():
+        if len(claims) == 1:
+            winner = claims[0][0]
+        else:
+            winner = max(claims, key=lambda x: x[1])[0]
+        assigned_ips[winner] = assigned_ips.get(winner, 0) + 1
+
+    for idx, (iid, remark, port, clients) in enumerate(all_inbounds, 1):
         for client in clients:
             email = client["email"]
             traffic = await api.get_client_traffic(email)
@@ -241,12 +262,7 @@ async def get_status_data(api, config: dict) -> dict:
             if total_inbounds > 1:
                 inbound_label = f"[{idx}. {remark}] "
 
-            # Get connected IPs count (cross-reference historical IPs with active TCP connections)
-            connected_ips = 0
-            if is_online:
-                client_ips = await api.get_client_ips(email)
-                connected_ips = len(set(client_ips) & active_ips) if client_ips else 0
-
+            connected_ips = assigned_ips.get(email, 0)
             device_limit = client.get("limitIp", 0)
 
             client_data.append({

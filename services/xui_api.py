@@ -247,6 +247,25 @@ class XUIApi:
                 return [item.split(" ")[0] for item in obj if item]
         return []
 
+    async def get_client_ips_with_dates(self, email: str) -> dict:
+        """Returns {ip: datetime_str} from clientIps API."""
+        data = await self._request("POST", f"/clientIps/{email}")
+        if data and data.get("success"):
+            obj = data.get("obj", "")
+            items = []
+            if isinstance(obj, str) and obj and obj != "No IP Record":
+                items = [s.strip() for s in obj.split(",") if s.strip()]
+            elif isinstance(obj, list):
+                items = [s for s in obj if s]
+            result = {}
+            for item in items:
+                parts = item.split(" (", 1)
+                ip = parts[0].strip()
+                date = parts[1].rstrip(")") if len(parts) > 1 else ""
+                result[ip] = date
+            return result
+        return {}
+
     async def clear_client_ips(self, email: str) -> bool:
         data = await self._request("POST", f"/clearClientIps/{email}")
         return data and data.get("success", False)
