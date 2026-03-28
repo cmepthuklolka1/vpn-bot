@@ -202,28 +202,40 @@ async def get_status_data(api, config: dict) -> dict:
         if port and port not in active_ips_by_port:
             active_ips_by_port[port] = _get_active_ips(port)
 
-    # Collect IP claims from all online clients, then assign each shared IP
-    # to the client with the most recent date (avoids double-counting behind NAT)
-    ip_claims = {}  # {ip: [(email, date_str), ...]}
+    # Phase 1: Build {ip: [email, ...]} using proven get_client_ips()
+    ip_to_emails = {}
     for iid, remark, port, clients in all_inbounds:
         active_ips = active_ips_by_port.get(port, set())
         for client in clients:
             email = client["email"]
             if email not in online_emails:
                 continue
-            ips_with_dates = await api.get_client_ips_with_dates(email)
-            for ip, date_str in ips_with_dates.items():
+            client_ips = await api.get_client_ips(email)
+            if not client_ips:
+                continue
+            for ip in client_ips:
                 if ip in active_ips:
-                    ip_claims.setdefault(ip, []).append((email, date_str))
+                    ip_to_emails.setdefault(ip, []).append(email)
 
-    # Assign each active IP to one client (most recent date wins)
+    # Phase 2: Assign each IP to one email; shared IPs resolved by most recent date
     assigned_ips = {}  # {email: count}
-    for ip, claims in ip_claims.items():
-        if len(claims) == 1:
-            winner = claims[0][0]
+    for ip, emails in ip_to_emails.items():
+        if len(emails) == 1:
+            winner = emails[0]
         else:
-            winner = max(claims, key=lambda x: x[1])[0]
+            best_email, best_date = emails[0], ""
+            for em in emails:
+                try:
+                    ips_dates = await api.get_client_ips_with_dates(em)
+                    d = ips_dates.get(ip, "")
+                    if d > best_date:
+                        best_date, best_email = d, em
+                except Exception:
+                    pass
+            winner = best_email
         assigned_ips[winner] = assigned_ips.get(winner, 0) + 1
+
+    total_active = sum(assigned_ips.values())
 
     for idx, (iid, remark, port, clients) in enumerate(all_inbounds, 1):
         for client in clients:
@@ -255,7 +267,7 @@ async def get_status_data(api, config: dict) -> dict:
                     speed_str = f"🟡 {eff['speed_80pct_mbps']} Мбит"
                 else:
                     base = eff["speed_base_mbps"]
-                    speed_str = "🟢 без лимита" if base == 0 else f"🟢 {base} Мбит"
+                    speed_str = "" if base == 0 else f"🟢 {base} Мбит"
 
             # Inbound label (only when multiple inbounds)
             inbound_label = ""
@@ -281,5 +293,6 @@ async def get_status_data(api, config: dict) -> dict:
         "clients": client_data,
         "total_usage_gb": bytes_to_gb(total_usage),
         "total_limit_gb": total_limit_gb,
+        "total_active": total_active,
         "updated_at": datetime.now().strftime("%d.%m.%Y %H:%M"),
     }

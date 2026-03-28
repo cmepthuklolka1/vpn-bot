@@ -4,7 +4,8 @@ from html import escape
 
 def format_status(data: dict) -> str:
     """Format the pinned status message."""
-    lines = ["📊 <b>Статус клиентов</b>", ""]
+    total_active = data.get("total_active", 0)
+    lines = [f"📊 <b>Статус клиентов [{total_active}]</b>", ""]
 
     for c in data["clients"]:
         online = "🟢" if c["is_online"] else "⚪"
@@ -18,7 +19,9 @@ def format_status(data: dict) -> str:
 
         lines.append(
             f"{online} <b>{prefix}{escape(c['email'])}</b>{enabled}\n"
-            f"   📦 {c['usage_gb']:.1f} ГБ / {c['limit_str']}  |  {c['speed_str']}  |  📱 {devices_str}"
+            f"   📦 {c['usage_gb']:.1f} ГБ / {c['limit_str']}"
+            + (f"  |  {c['speed_str']}" if c.get('speed_str') else "")
+            + f"  |  📱 {devices_str}"
         )
 
     lines.append("")
