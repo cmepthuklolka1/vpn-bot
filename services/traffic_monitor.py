@@ -22,6 +22,10 @@ def _get_active_ips(port: int) -> set:
             if len(parts) >= 4:
                 peer = parts[3]
                 ip = peer.rsplit(":", 1)[0]
+                # Normalize IPv6-mapped addresses: [::ffff:1.2.3.4] → 1.2.3.4
+                ip = ip.strip("[]")
+                if ip.startswith("::ffff:"):
+                    ip = ip[7:]
                 ips.add(ip)
         return ips
     except Exception as e:
