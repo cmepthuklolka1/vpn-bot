@@ -47,6 +47,7 @@ def main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🚫 Баны", callback_data="bans")],
     ]
     if is_admin:
+        buttons.append([InlineKeyboardButton("🔄 Сброс трафика", callback_data="reset_traffic")])
         buttons.append([InlineKeyboardButton("👑 Управление операторами", callback_data="manage_operators")])
     return InlineKeyboardMarkup(buttons)
 
@@ -119,3 +120,66 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]),
         parse_mode="HTML"
     )
+
+
+@require_admin
+async def reset_traffic_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show confirmation dialog before resetting all traffic."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "🔄 <b>Сброс трафика</b>\n\n"
+        "Будет выполнен полный сброс трафика всех клиентов на всех inbound'ах "
+        "(архивирование текущих значений + обнуление в панели + очистка лимитов скорости).\n\n"
+        "⚠️ Это действие необратимо. Продолжить?",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Да, сбросить", callback_data="reset_traffic_do"),
+                InlineKeyboardButton("❌ Отмена", callback_data="main_menu"),
+            ]
+        ]),
+        parse_mode="HTML"
+    )
+
+
+@require_admin
+async def reset_traffic_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Actually run the traffic reset after confirmation."""
+    query = update.callback_query
+    await query.answer()
+
+    api = context.bot_data["api"]
+    config = context.bot_data["config"]
+    is_admin = db.is_admin(query.from_user.id, config)
+
+    await query.edit_message_text(
+        "⏳ <b>Сброс трафика...</b>\n\nАрхивирую и сбрасываю данные. Это может занять несколько секунд.",
+        parse_mode="HTML"
+    )
+
+    from services.traffic_monitor import monthly_reset
+    try:
+        success = await monthly_reset(api, config)
+    except Exception as e:
+        await query.edit_message_text(
+            f"❌ <b>Ошибка сброса</b>\n\n<code>{e}</code>",
+            reply_markup=main_menu_keyboard(is_admin),
+            parse_mode="HTML"
+        )
+        return
+
+    if success:
+        await query.edit_message_text(
+            "✅ <b>Сброс выполнен</b>\n\n"
+            "Трафик всех клиентов обнулён, ограничения скорости очищены.",
+            reply_markup=main_menu_keyboard(is_admin),
+            parse_mode="HTML"
+        )
+    else:
+        await query.edit_message_text(
+            "⚠️ <b>Сброс не удался</b>\n\n"
+            "Панель вернула ошибку при сбросе трафика. Детали см. в логах бота "
+            "(<code>journalctl -u vpn-bot</code>).",
+            reply_markup=main_menu_keyboard(is_admin),
+            parse_mode="HTML"
+        )

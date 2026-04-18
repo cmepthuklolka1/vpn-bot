@@ -290,6 +290,8 @@ def main():
     app.add_handler(CallbackQueryHandler(bans.unban_action, pattern=r"^unban"))
     app.add_handler(CallbackQueryHandler(users.show_operators, pattern="^manage_operators$"))
     app.add_handler(CallbackQueryHandler(users.delete_operator, pattern=r"^del_operator:"))
+    app.add_handler(CallbackQueryHandler(menu.reset_traffic_confirm, pattern="^reset_traffic$"))
+    app.add_handler(CallbackQueryHandler(menu.reset_traffic_do, pattern="^reset_traffic_do$"))
 
     # Global error handler
     app.add_error_handler(error_handler)

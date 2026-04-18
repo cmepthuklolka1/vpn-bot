@@ -83,11 +83,27 @@ class XUIApi:
                     if await self.login():
                         headers = {"Cookie": self.cookie}
                         async with session.request(method, self._api_url(path), headers=headers, **kwargs) as resp2:
-                            return await resp2.json()
+                            if resp2.status != 200:
+                                body = await resp2.text()
+                                logger.error(f"API {method} {path} -> HTTP {resp2.status}: {body[:500]}")
+                                return None
+                            data = await resp2.json()
+                            if isinstance(data, dict) and data.get("success") is False:
+                                logger.error(f"API {method} {path} returned success=false: {data.get('msg')!r}")
+                            return data
                     return None
-                return await resp.json()
+
+                if resp.status != 200:
+                    body = await resp.text()
+                    logger.error(f"API {method} {path} -> HTTP {resp.status}: {body[:500]}")
+                    return None
+
+                data = await resp.json()
+                if isinstance(data, dict) and data.get("success") is False:
+                    logger.error(f"API {method} {path} returned success=false: {data.get('msg')!r}")
+                return data
         except Exception as e:
-            logger.error(f"API request error {path}: {e}")
+            logger.error(f"API {method} {path} exception: {e}")
             return None
 
     # --- Inbounds ---
@@ -225,12 +241,53 @@ class XUIApi:
             return True
         return False
 
-    async def reset_all_traffics(self) -> bool:
-        data = await self._request("POST", "/resetAllTraffics")
+    async def reset_all_client_traffics(self, inbound_id: int) -> bool:
+        """Reset per-client traffic counters (clientStats) for a single inbound."""
+        data = await self._request("POST", f"/resetAllClientTraffics/{inbound_id}")
         if data and data.get("success"):
             return True
-        logger.error(f"reset_all_traffics failed: {data}")
+        logger.error(f"resetAllClientTraffics failed for inbound {inbound_id}: {data}")
         return False
+
+    async def reset_all_traffics(self) -> bool:
+        """
+        Reset traffic for every client on every inbound.
+
+        Calls /resetAllClientTraffics/{id} per inbound (this is what actually
+        zeros per-client counters in the panel UI and get_client_traffic),
+        then calls /resetAllTraffics to also clear inbound-level up/down totals.
+
+        Returns True only if all per-client resets succeed. Inbound-level reset
+        is best-effort.
+        """
+        inbounds = await self.list_inbounds()
+        if inbounds is None:
+            logger.error("reset_all_traffics: list_inbounds returned None")
+            return False
+        if not inbounds:
+            logger.warning("reset_all_traffics: no inbounds configured")
+            return True
+
+        failed_ids = []
+        for ib in inbounds:
+            iid = ib.get("id")
+            if iid is None:
+                continue
+            ok = await self.reset_all_client_traffics(iid)
+            if not ok:
+                failed_ids.append(iid)
+
+        if failed_ids:
+            logger.error(f"reset_all_traffics: per-client reset failed for inbounds {failed_ids}")
+            return False
+
+        # Best-effort inbound-level counter reset
+        data = await self._request("POST", "/resetAllTraffics")
+        if not (data and data.get("success")):
+            logger.warning(f"reset_all_traffics: inbound-level reset failed (non-fatal): {data}")
+
+        logger.info(f"reset_all_traffics: reset {len(inbounds)} inbound(s) successfully")
+        return True
 
     # --- Client IPs ---
 
